@@ -1,0 +1,79 @@
+#!/bin/sh
+
+# Init file for BackupD
+#
+# chkconfig: 345 99 99
+# description: BackupD - A Backup Daemon
+#
+# processname: BackupD
+# config /etc/BackupD.conf
+
+# source function library
+. /etc/rc.d/init.d/functions
+
+RETVAL=0
+prog="BackupD"
+BackupD=/usr/sbin/BackupD
+OPTIONS="-d -n 60 --file /etc/BackupD.conf"
+perl=`which perl`
+
+start()
+{
+    echo -n $"Starting $prog: "
+    if [ ! -f $log ]; then
+        touch $log
+    fi
+    $perl $BackupD $OPTIONS
+    sleep 1
+    action "" /sbin/pidof $perl $BackupD
+    RETVAL=$?
+    [ "$RETVAL" = 0 ] && touch /var/lock/subsys/BackupD
+}
+
+stop()
+{
+    echo -n $"Stopping $prog: "
+    ps auxw | grep $perl | grep $BackupD | awk '{ system("kill -KILL "$2) }'
+    RETVAL=$?
+    action "" [ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/BackupD
+}
+
+status() {
+    pids=`ps auxw | grep $perl | grep $BackupD | awk '{ system("echo -n " $2 ) }'`
+    RETVAL=$?
+    if [ "$pids" = "" ]; then
+        echo "$prog ist stopped..."
+    else
+        echo "$prog is running..."
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    condrestart)
+        if [ -f /var/lock/subsys/BackupD ] ; then
+            if [ "$RETVAL" = 0 ] ; then
+                stop
+                # avoid race
+                sleep 3
+                start
+            fi
+        fi
+        ;;
+    status)
+        status
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|restart|condrestart|status}"
+        RETVAL=1
+esac
+exit $RETVAL

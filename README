@@ -1,0 +1,17 @@
+
+#############################################################
+# BackupD - A Backup Daemon
+#############################################################
+
+If you want to get some help user perldoc BackupD. I guess it
+will help you. Else print the source code and eat it. Please
+take some photos and send it to me. :o)
+
+OK. Enough jokes for now.
+Contributions are welcome, but please inform me about those!
+
+If you get problems you may ask me using electronic mail.
+Don't try to send me snail mail, I'm not going to answer it.
+Postcards are welcome. Money as well. :o)
+
+Oliver Pitzeier <oliver@linux-kernel.at>, June 2002

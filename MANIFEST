@@ -1,0 +1,6 @@
+MANIFEST
+Makefile.PL
+README
+test.pl
+bin/BackupD.pl
+etc/config.sbp.cfg
