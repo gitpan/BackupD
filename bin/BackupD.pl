@@ -2,9 +2,21 @@
 
 ###########################################################################
 #
-# $Id: BackupD.pl,v 1.11 2002/07/09 10:53:36 oliver Exp $
+# $Id: BackupD.pl,v 1.15 2002/07/10 14:07:12 oliver Exp $
 #
 # $Log: BackupD.pl,v $
+# Revision 1.15  2002/07/10 14:07:12  oliver
+# Added FTP-Routine.
+#
+# Revision 1.14  2002/07/10 13:53:29  oliver
+# Added extraparams to the wget routine.
+#
+# Revision 1.13  2002/07/10 13:50:04  oliver
+# Added http-backup function. Call it stupid, but I guess there are people out there who might can use it
+#
+# Revision 1.12  2002/07/09 14:44:14  oliver
+# Added psql cleanup. Fixed some doc.
+#
 # Revision 1.11  2002/07/09 10:53:36  oliver
 # I cleaned out some errors... I found them while distributing the new rpm...
 #
@@ -60,7 +72,7 @@ use POSIX qw(setsid);
 # I'm the main author of this program.
 my $PROGNAME   = 'BackupD.pl';
 my $AUTHOR     = 'Oliver Pitzeier <oliver@linux-kernel.at>';
-(our $VERSION) = '$Revision: 1.11 $' =~ /([\d.]+)/;
+(our $VERSION) = '$Revision: 1.15 $' =~ /([\d.]+)/;
 
 my $configfile = "BackupD.cfg";    # Configfile where we find what should be backuped.
 my $backupdir  = "/backup";        # Please do not add a slash (or even more) at the end
@@ -173,11 +185,10 @@ sub rsync_backup_pre($$) {          # Run rsync-backup for given host
     print "Running rsync-backup for \"$host\:\:$what\".\n";
 
     # Cleanup of old rsync backups
-    # This runs trough the whole backup-tree this means that every
-    # host backups will be cleaned up and not only the current host
-    # I whish the were more documentation like this. :o)
+    # This runs through the whole backup-tree. This means that every
+    # host backup will be cleaned up and not only the current host
 
-    print "Running cleanup...\n";
+    print "Running rsync-cleanup...\n";
 
     # This part gets the date in a way we can use it for calculating
     my $currentdate = sprintf("%04d%02d%02d", localtime->year+1900, localtime->mon+1, localtime->mday);
@@ -191,7 +202,7 @@ sub rsync_backup_pre($$) {          # Run rsync-backup for given host
 
     # Find all compress tarballs. Maybe there will be file from the rsync as
     # well... But this is a quick hack as well.
-    my $command=qq!find $backupdir -name *.tgz* -maxdepth 2 -printf "%TY%Tm%Td %p\n"!;
+    my $command=qq!find $backupdir -name "*.tgz" -maxdepth 2 -printf "%TY%Tm%Td %p\n"!;
     open my $fh, "$command |" or die "can't pipe '$command': $!\n";
 
     # Get the filenames and the date, split it and delete the file if it is
@@ -223,6 +234,32 @@ sub psql_backup_pre($$$) {          # Run psql-backup for given host
     # For each db in the array (returned from find_psql_databases) make
     # a backup. If the dbname in the config is "all" then _all_ databases will be
     # backuped.
+
+    # Cleanup of old psql backups
+    my $currentdate = sprintf("%04d%02d%02d", localtime->year+1900, localtime->mon+1, localtime->mday);
+    
+    # A very silly name for a variable. oldnes describes what _old_ is. :o)
+    # Seven days (one week) is old. This is not really true if a new month
+    # just began. Let me know if you want to write a better routine for this.
+    # It's just a quick hack.
+    my $oldnes = 7;
+    $oldnes = 77 if localtime->mday < 7;
+
+    # Find all psql backup directories.
+    my $command=qq!find $backupdir/$host/psql/* -type d -printf "%TY%Tm%Td %p\n"!;
+    open my $fh, "$command |" or die "can't pipe '$command': $!\n";
+
+    # Get the filenames and the date, split it and delete the file if it is
+    # older than the allowed "oldnes". Yeah here again the crazy variable.
+    while (<$fh>) {
+        my ($date, $filename) = split(" ");
+        my $difference = $currentdate - $date;
+        print "$filename is old!\n"  if $difference >= $oldnes;
+        do_system("rm -Rf $filename") if $difference >= $oldnes;
+    }
+    close $fh;
+    # End of cleanup routine
+
     for my $dbname ($what eq 'all' ? find_psql_databases($host, $extraparams) : $what) {
 	print qq!Running psql-backup for "$host\:\:$dbname" with extraparams: $extraparams\n!;
 	do_system(<<EOCMD, "for db: $dbname");
@@ -231,6 +268,92 @@ pg_dump -h $host $extraparams $dbname | \\
     2> $backupdir/$host/last-psql-$dbname.log &
 EOCMD
     }
+}
+
+sub http_backup_pre($$$) {	# Run http-backup for given host
+    # Define some variables
+    my ($host, $what, $extraparams) = @_;
+    (my $logname = $what) =~ s!/!_!g;
+    $extraparams = "" unless $extraparams;
+
+    # Create the http-backupdir with the current timestamp
+    return unless assert_dir("$backupdir/$host/http/$datetime");
+
+    # Cleanup of old http backups
+    my $currentdate = sprintf("%04d%02d%02d", localtime->year+1900, localtime->mon+1, localtime->mday);
+
+    # A very silly name for a variable. oldnes describes what _old_ is. :o)
+    # Seven days (one week) is old. This is not really true if a new month
+    # just began. Let me know if you want to write a better routine for this.
+    # It's just a quick hack.
+    my $oldnes = 7;
+    $oldnes = 77 if localtime->mday < 7;
+
+    # Find all http backup dirctories.
+    my $command=qq!find $backupdir/$host/http/* -type d -printf "%TY%Tm%Td %p\n"!;
+        open my $fh, "$command |" or die "can't pipe '$command': $!\n";
+
+    # Get the filenames and the date, split it and delete the file if it is
+    # older than the allowed "oldnes". Yeah here again the crazy variable.
+    while (<$fh>) {
+        my ($date, $filename) = split(" ");
+        my $difference = $currentdate - $date;
+        print "$filename is old!\n"  if $difference >= $oldnes;
+        do_system("rm -Rf $filename") if $difference >= $oldnes;
+    }
+    close $fh;
+    # End of cleanup routine
+
+    print qq!Running http-backup for "$host$what" with extraparams: $extraparams\n!;
+    do_system(<<EOCMD, "for: $what");
+wget -x -nH $extraparams -P $backupdir/$host/http/$datetime http://$host$what \\
+>$backupdir/$host/http/last-wget-$logname.log 2>&1 && \
+tar cfvz $backupdir/$host/$logname-$datetime.tgz $backupdir/$host/http/$datetime \\
+>$backupdir/$host/last-wget-tar-$logname.log 2>&1 &
+EOCMD
+}
+
+sub ftp_backup_pre($$$) {      # Run ftp-backup for given host
+    # Define some variables
+    my ($host, $what, $extraparams) = @_;
+    (my $logname = $what) =~ s!/!_!g;
+    $extraparams = "" unless $extraparams;
+
+    # Create the ftp-backupdir with the current timestamp
+    return unless assert_dir("$backupdir/$host/ftp/$datetime");
+
+    # Cleanup of old ftp backups
+    my $currentdate = sprintf("%04d%02d%02d", localtime->year+1900, localtime->mon+1, localtime->mday);
+
+    # A very silly name for a variable. oldnes describes what _old_ is. :o)
+    # Seven days (one week) is old. This is not really true if a new month
+    # just began. Let me know if you want to write a better routine for this.
+    # It's just a quick hack.
+    my $oldnes = 7;
+    $oldnes = 77 if localtime->mday < 7;
+
+    # Find all ftp backup dirctories.
+    my $command=qq!find $backupdir/$host/ftp/* -type d -printf "%TY%Tm%Td %p\n"!;
+        open my $fh, "$command |" or die "can't pipe '$command': $!\n";
+
+    # Get the filenames and the date, split it and delete the file if it is
+    # older than the allowed "oldnes". Yeah here again the crazy variable.
+    while (<$fh>) {
+        my ($date, $filename) = split(" ");
+        my $difference = $currentdate - $date;
+        print "$filename is old!\n"  if $difference >= $oldnes;
+        do_system("rm -Rf $filename") if $difference >= $oldnes;
+    }
+    close $fh;
+    # End of cleanup routine
+
+    print qq!Running ftp-backup for "$host$what" with extraparams: $extraparams\n!;
+    do_system(<<EOCMD, "for: $what");
+wget -x -nH $extraparams -P $backupdir/$host/ftp/$datetime ftp://$host$what \\
+>$backupdir/$host/ftp/last-wget-$logname.log 2>&1 && \
+tar cfvz $backupdir/$host/$logname-$datetime.tgz $backupdir/$host/ftp/$datetime \\
+>$backupdir/$host/last-wget-tar-$logname.log 2>&1 &
+EOCMD
 }
 
 sub assert_dir {
@@ -253,7 +376,7 @@ sub do_system {
         print "TEST: $command\n";
     } else {
         system($command);
-        print $? ? "Error occured: $?\n" : "Everything seems to be done$msg!\n";
+        print $? ? "Error occured: $?\n" : "Everything seems to be done $msg!\n";
     }
 }
 
@@ -272,6 +395,14 @@ sub main_loop {
         } elsif ($conf->{backup_type} eq 'rsync') {
                 if($now_hour == $conf->{hour} && $now_minute == $conf->{minute}) {
 	        rsync_backup_pre($conf->{host}, $conf->{what});
+                }
+        } elsif ($conf->{backup_type} eq 'http') {
+                if($now_hour == $conf->{hour} && $now_minute == $conf->{minute}) {
+                http_backup_pre($conf->{host}, $conf->{what}, $conf->{extraparams});
+                }
+        } elsif ($conf->{backup_type} eq 'ftp') {
+                if($now_hour == $conf->{hour} && $now_minute == $conf->{minute}) {
+                ftp_backup_pre($conf->{host}, $conf->{what}, $conf->{extraparams});
                 }
         # I hope someone adds more backup-types :o)
         } else {

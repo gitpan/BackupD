@@ -1,7 +1,7 @@
 Summary: BackupD - A BackupD Daemon
 Name: BackupD
-Version: 1.11
-Release: 3
+Version: 1.12
+Release: 1
 License: GPL
 Group: System Environment/Daemons
 Source: http://linux-kernel.at/downloads/BackupD-%{version}.tar.gz
