@@ -2,9 +2,15 @@
 
 ###########################################################################
 #
-# $Id: BackupD.pl,v 1.9 2002/06/25 21:47:50 oliver Exp $
+# $Id: BackupD.pl,v 1.11 2002/07/09 10:53:36 oliver Exp $
 #
 # $Log: BackupD.pl,v $
+# Revision 1.11  2002/07/09 10:53:36  oliver
+# I cleaned out some errors... I found them while distributing the new rpm...
+#
+# Revision 1.10  2002/07/09 10:34:48  oliver
+# Added clean-up for rsync-backups and a lot of comments. The config was changed because of testing.
+#
 # Revision 1.9  2002/06/25 21:47:50  oliver
 # Many small changes. Added autoflush, Added _usefull_ logging. Fixed some bugs. Corrected the .spec-File and the init-script.
 #
@@ -48,9 +54,13 @@ use Time::localtime;
 use Getopt::Long;
 use POSIX qw(setsid);
 
+# OK, here are some variables.
+# $VERSION is changed after each commit to the CVS tree. Oh yes,
+# we use CVS for better control of the commits by our authors.
+# I'm the main author of this program.
 my $PROGNAME   = 'BackupD.pl';
 my $AUTHOR     = 'Oliver Pitzeier <oliver@linux-kernel.at>';
-(our $VERSION) = '$Revision: 1.9 $' =~ /([\d.]+)/;
+(our $VERSION) = '$Revision: 1.11 $' =~ /([\d.]+)/;
 
 my $configfile = "BackupD.cfg";    # Configfile where we find what should be backuped.
 my $backupdir  = "/backup";        # Please do not add a slash (or even more) at the end
@@ -65,7 +75,6 @@ my $datetime = sprintf("%04d-%02d-%02d+%02d_%02d_%02d",
 my $now_hour   = localtime->hour;
 my $now_minute = localtime->min;
 
-
 # Get the options using Getopt::Long. More information see: "perldoc Getopt::Long"
 my $result = GetOptions(
     "interval|n=i" => \$interval,
@@ -79,6 +88,7 @@ my $result = GetOptions(
 print "TEST RUN!\n" if $testrun;
 
 if ($help) {
+    # Print the help - hard to guess, isn't it... :o)
     print "$PROGNAME - by $AUTHOR\n\n";
     print "usage: $PROGNAME [--interval|-n <seconds>] [--daemon|-d|-D] [--help|-h|-?]\n";
     print "--interval|-n :      This option defaults to: $interval seconds\n";
@@ -91,6 +101,7 @@ if ($help) {
 }
 
 sub read_config($) {               # Read the configfile
+    # Reads the config file and return it as an array.
     my $filename = shift;
     my $fh = new IO::File;
     my @config;
@@ -107,6 +118,9 @@ sub read_config($) {               # Read the configfile
 }
 
 sub print_config {                 # Print the configfile
+    # This functions only prints the config an a readable way
+    # So the sysadmin or someone else can check if the config
+    # file is read and interpreted correctly
     my @config = read_config($configfile);
     use Data::Dumper;
     print Dumper \@config;
@@ -114,13 +128,21 @@ sub print_config {                 # Print the configfile
 }
 
 sub find_psql_databases($$) {       # Find all psql-databases on a host
+   # Define some variables
    my $host        = shift;
    my $extraparams = shift || '';
 
    my @dbs;
    my $command = "LC_ALL=en_US psql -h $host $extraparams -l";
+
+   # Execute psql (see $command above) and pipe it. We then can
+   # use the output just as if it would be a normal filehandler
    open my $fh, "$command |" or die "can't pipe from '$command': $!\n";
+
    my $seen_divider;
+   # Jump over the headers. I hope the header looks the same
+   # for different PostgreSQL versions. This was written and
+   # tested with PostgreSQL 7.2(.1)
    while (<$fh>) {
    	chomp;
 	if (/^[-+]+$/) {
@@ -134,18 +156,54 @@ sub find_psql_databases($$) {       # Find all psql-databases on a host
    }
    close $fh or die "can't close pipe: $!\n";
 
+   # Return an array of database-names
    return @dbs;
 }
 
 sub rsync_backup_pre($$) {          # Run rsync-backup for given host
+    # Define some variables
     my ($host, $what) = @_;
     my $dir = "$backupdir/$host/rsync/$what";
     $_ = $dir;
     ($dir) = (m{(.*)/(?!$)}) if ($what =~ /\//);
     (my $logname = $what) =~ s!/!_!g;
 
+    # Create the backupdir of the current host and print some message
     return unless assert_dir("$backupdir/$host/rsync/$what");
     print "Running rsync-backup for \"$host\:\:$what\".\n";
+
+    # Cleanup of old rsync backups
+    # This runs trough the whole backup-tree this means that every
+    # host backups will be cleaned up and not only the current host
+    # I whish the were more documentation like this. :o)
+
+    print "Running cleanup...\n";
+
+    # This part gets the date in a way we can use it for calculating
+    my $currentdate = sprintf("%04d%02d%02d", localtime->year+1900, localtime->mon+1, localtime->mday);
+
+    # A very silly name for a variable. oldnes describes what _old_ is. :o)
+    # Seven days (one week) is old. This is not really true if a new month
+    # just began. Let me know if you want to write a better routine for this.
+    # It's just a quick hack.
+    my $oldnes = 7;
+    $oldnes = 77 if localtime->mday < 7;
+
+    # Find all compress tarballs. Maybe there will be file from the rsync as
+    # well... But this is a quick hack as well.
+    my $command=qq!find $backupdir -name *.tgz* -maxdepth 2 -printf "%TY%Tm%Td %p\n"!;
+    open my $fh, "$command |" or die "can't pipe '$command': $!\n";
+
+    # Get the filenames and the date, split it and delete the file if it is
+    # older than the allowed "oldnes". Yeah here again the crazy variable.
+    while (<$fh>) {
+        my ($date, $filename) = split(" ");
+        my $difference = $currentdate - $date;
+        print "$filename is old!\n"  if $difference >= $oldnes;
+        do_system("rm -f $filename") if $difference >= $oldnes;
+    }
+    close $fh;
+    # End of cleanup routine
 
     do_system(<<EOCMD);
 rsync -avz $host\:\:$what $dir \\
@@ -156,8 +214,15 @@ EOCMD
 }
 
 sub psql_backup_pre($$$) {          # Run psql-backup for given host
+    # Define some variables
     my ($host, $what, $extraparams) = @_;
+
+    # Create the psql-backupdir with the current timestamp
     return unless assert_dir("$backupdir/$host/psql/$datetime");
+
+    # For each db in the array (returned from find_psql_databases) make
+    # a backup. If the dbname in the config is "all" then _all_ databases will be
+    # backuped.
     for my $dbname ($what eq 'all' ? find_psql_databases($host, $extraparams) : $what) {
 	print qq!Running psql-backup for "$host\:\:$dbname" with extraparams: $extraparams\n!;
 	do_system(<<EOCMD, "for db: $dbname");
@@ -169,6 +234,8 @@ EOCMD
 }
 
 sub assert_dir {
+    # This creates a host and/or backup-type specific backup-dir and
+    # has some kind of error catching. There is no more to say.
     my $dir = shift;
     return 1 if -d $dir;
     print "Hostdir doesn't exist\nI'll create it for you...\n";
@@ -179,19 +246,25 @@ sub assert_dir {
 }
 
 sub do_system {
-	my ($command, $msg) = @_;
-	$msg ||= '';
-	if ($testrun) {
-		print "TEST: $command\n";
-	} else {
-		system($command);
-		print $? ? "Error occured: $?\n" : "Everything seems to be done$msg!\n";
-	}
+    # This function executes a systemcall and checks if an error occured.
+    my ($command, $msg) = @_;
+    $msg ||= '';
+    if ($testrun) {
+        print "TEST: $command\n";
+    } else {
+        system($command);
+        print $? ? "Error occured: $?\n" : "Everything seems to be done$msg!\n";
+    }
 }
 
 sub main_loop {
+    # This is the main program loop.
+    # It is executed from the memory resistent (daemon like) part
+    # of this program
     print "Reading config...\n";
     for my $conf (read_config($configfile)) {
+        # Check if it is time to backup and what kind it is.
+        # This is allready a new thread of BackupD 
         if ($conf->{backup_type} eq 'psql')  {
                 if($now_hour == $conf->{hour} && $now_minute == $conf->{minute}) {
                 psql_backup_pre($conf->{host}, $conf->{what}, $conf->{extraparams} || '');
@@ -200,6 +273,7 @@ sub main_loop {
                 if($now_hour == $conf->{hour} && $now_minute == $conf->{minute}) {
 	        rsync_backup_pre($conf->{host}, $conf->{what});
                 }
+        # I hope someone adds more backup-types :o)
         } else {
 	    print "I really don't know how to handle THIS!\n"
         }
@@ -207,6 +281,8 @@ sub main_loop {
 }
 
 if($daemon) {
+    # If this should be a daemon set stdout and stderr to the logfile, set the autoflush flag
+    # and fork a kind
     open STDOUT, '>>/var/log/BackupD.log' or die "Can't write to /var/log/BackupD.log: $!";
     open STDERR, '>>/var/log/BackupD.log' or die "Can't write to /var/log/BackupD.log: $!";
     autoflush STDOUT 1;
@@ -228,6 +304,8 @@ if($daemon) {
         $now_hour   = localtime->hour;
         $now_minute = localtime->min;
 
+        # Print something to the logfile. This is called a checkpoint
+        # Because then you can check after some failure, where it stopped.
         print "$log_datetime BackupD checkpoint - before backup\n";
         &main_loop;
         print "$log_datetime BackupD checkpoint - after backup\n";
@@ -257,7 +335,7 @@ Afterwards it will be available at linux-kernel.at and uptime.at
 
 =head1 LICENSE
 
-This script has been developed under GPL.
+This program has been developed under GPL.
 
 =head1 AUTHOR
 

@@ -2,5 +2,8 @@ MANIFEST
 Makefile.PL
 README
 test.pl
+BackupD.spec
+BackupD.rc
 bin/BackupD.pl
 etc/config.sbp.cfg
+contrib/BackupD-Configviewer.pl

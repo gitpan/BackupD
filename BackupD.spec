@@ -1,7 +1,7 @@
 Summary: BackupD - A BackupD Daemon
 Name: BackupD
-Version: 1.0
-Release: 1
+Version: 1.11
+Release: 3
 License: GPL
 Group: System Environment/Daemons
 Source: http://linux-kernel.at/downloads/BackupD-%{version}.tar.gz
@@ -50,7 +50,7 @@ fi
 
 %postun
 if [ "$1" -eq "1" ]; then
-    service squid condrestart >/dev/null 2>&1
+    service BackupD restart >/dev/null 2>&1
 fi
 
 %changelog
